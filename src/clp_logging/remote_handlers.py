@@ -14,13 +14,13 @@ class CLPRemoteHandler():
     """
 
     def __init__(self, log_name, log_path, s3_bucket) -> None:
-        self.thread_info = {}
         self.s3_resource = boto3.resource("s3")
         self.s3_client = boto3.client("s3")
         self.log_path = log_path
         self.log_name = log_name
         self.transfer = 0
         self.bucket = s3_bucket
+        self.remote_file_count = 0
 
         self.timestamp = datetime.datetime.now()
         self.folder_path = f"logs/{self.timestamp.year}/{self.timestamp.month}/{self.timestamp.day}"
@@ -40,10 +40,14 @@ class CLPRemoteHandler():
 
     def _remote_log_naming(self):
         ext = self.log_name.find(".")
+        upload_time = self.timestamp.strftime("%Y-%m-%d-%H%M%S")
+        if self.remote_file_count != 0:
+            upload_time += "-" + str(self.remote_file_count)
+
         if ext != -1:
-            new_filename = f'log_{self.timestamp.strftime("%Y-%m-%d-%H%M%S")}{self.log_name[ext:]}'
+            new_filename = f'log_{upload_time}{self.log_name[ext:]}'
         else:
-            new_filename = f'{self.timestamp.strftime("%Y-%m-%d-%H%M%S")}_{self.log_name}'
+            new_filename = f'{upload_time}_{self.log_name}'
         file_name = f"{self.folder_path}/{new_filename}"
         return file_name
 
@@ -95,6 +99,20 @@ class CLPRemoteHandler():
         except Exception as e:
             print(f"Exception occurred: {e}")
             raise
+
+    def _complete_upload(self, upload_id):
+        return self.s3_client.complete_multipart_upload(
+            Bucket=self.bucket,
+            Key=self.obj_key,
+            UploadId=upload_id,
+            MultipartUpload={
+                "Parts": [
+                    {"PartNumber": part["PartNumber"], "ETag": part["ETag"], "ChecksumSHA256": part["ChecksumSHA256"]}
+                    for part in self.multipart_upload_config["uploaded parts"]
+                ]
+            },
+        )
+
     def multipart_upload(self):
         print(f"Initiate Multipart Upload of file {self.log_name}")
         create_ret = self.s3_client.create_multipart_upload(Bucket=self.bucket, Key=self.obj_key, ChecksumAlgorithm="SHA256")
@@ -109,49 +127,30 @@ class CLPRemoteHandler():
                 print(upload_status)
                 self.multipart_upload_config["index"] += 1
                 self.multipart_upload_config["pos"] += self.multipart_upload_config["size"]
+                self.multipart_upload_config["uploaded parts"].append(upload_status)
 
-                # AWS S3 Part number restriction
-                if (
-                    self.multipart_upload_config["index"] < 1
-                    or self.multipart_upload_config["index"] > 10000
-                ):
-                    # AWS limits multipart upload count to 10000
-                    self.s3_client.complete_multipart_upload(
-                        Bucket=self.bucket,
-                        Key=self.obj_key,
-                        UploadId=upload_id,
-                        MultipartUpload={
-                            "Parts": [
-                                {"PartNumber": part["PartNumber"], "ETag": part["ETag"],
-                                 "ChecksumSHA256": part["ChecksumSHA256"]}
-                                for part in self.multipart_upload_config["uploaded parts"]
-                            ]
-                        },
-                    )
+                # AWS S3 limits object part count to 10000
+                if self.multipart_upload_config["index"] > 10000:
+                    self._complete_upload(upload_id)
+
+                    # Initiate multipart upload to a new S3 object
+                    self.remote_file_count += 1
+                    self.obj_key = self._remote_log_naming()
+                    self.multipart_upload_config["index"] = 1
+                    self.multipart_upload_config["uploaded parts"] = []
                     create_ret = self.s3_client.create_multipart_upload(Bucket=self.bucket, Key=self.obj_key,
                                                                         ChecksumAlgorithm="SHA256")
                     upload_id = create_ret["UploadId"]
-                    break
-                self.multipart_upload_config["uploaded parts"].append(upload_status)
+
 
             # Upload the remaining segment
             if file_size - self.multipart_upload_config["pos"] < self.multipart_upload_config["size"]:
+                self.multipart_upload_config["size"] = file_size - self.multipart_upload_config["pos"]
                 response = self._upload_part(upload_id)
                 self.multipart_upload_config["index"] += 1
                 self.multipart_upload_config["uploaded parts"].append(response)
 
-            # Concatenate the parts in ascending part number order
-            response = self.s3_client.complete_multipart_upload(
-                Bucket=self.bucket,
-                Key=self.obj_key,
-                UploadId=upload_id,
-                MultipartUpload={
-                    "Parts": [
-                        {"PartNumber": part["PartNumber"], "ETag": part["ETag"], "ChecksumSHA256": part["ChecksumSHA256"]}
-                        for part in self.multipart_upload_config["uploaded parts"]
-                    ]
-                },
-            )
+            response = self._complete_upload(upload_id)
             print(response)
             print("Complete multipart upload")
             try:
