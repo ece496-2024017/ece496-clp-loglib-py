@@ -113,6 +113,12 @@ class CLPRemoteHandler():
             },
         )
 
+    def get_obj_key(self):
+        return self.obj_key
+
+    def set_obj_key(self, obj_key):
+        self.obj_key = obj_key
+
     def multipart_upload(self):
         print(f"Initiate Multipart Upload of file {self.log_name}")
         create_ret = self.s3_client.create_multipart_upload(Bucket=self.bucket, Key=self.obj_key, ChecksumAlgorithm="SHA256")
