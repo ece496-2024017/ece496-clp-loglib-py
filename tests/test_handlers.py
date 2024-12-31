@@ -10,6 +10,7 @@ from multiprocessing.sharedctypes import Array, Synchronized, SynchronizedArray,
 from pathlib import Path
 from typing import cast, Dict, IO, List, Optional, Union
 
+import botocore.exceptions
 import dateutil.parser
 from smart_open import open, register_compressor  # type: ignore
 from zstandard import (
@@ -30,6 +31,7 @@ from clp_logging.handlers import (
 )
 from clp_logging.protocol import Metadata
 from clp_logging.readers import CLPFileReader, CLPSegmentStreaming
+from clp_logging.remote_handlers import CLPRemoteHandler
 
 
 def _zstd_comppressions_handler(
@@ -463,6 +465,37 @@ class TestCLPLogLevelTimeoutBase(TestCLPBase):
                 (3 * LOG_DELAY_S) + TIMEOUT_PADDING_S,
             ],
         )
+
+
+class TestCLPRemoteHandler(TestCLPBase):
+    """
+        The TestCLPRemoteHandler class tests operations done by RemoteHandler
+        interacting with AWS S3. Unlike other handlers, remote_handlers works
+        only for the synchronization between remote and local logs
+    """
+
+    # override
+    def setUp(self) -> None:
+        super().setUp()
+        self.clp_handler: CLPStreamHandler = CLPFileHandler(
+            self.clp_log_path, enable_compression=False
+        )
+        self.setup_logging()
+        self.s3_bucket = 'ictrl-test2024' #Note, the bucket name is custom
+
+    def test_valid_remote_log_name(self):
+        self.logger.info('test_remote_handler_naming')
+
+        remote_handler = CLPRemoteHandler(self.clp_log_path.name, self.clp_log_path, self.s3_bucket)
+        remote_log_name = remote_handler._remote_log_naming()
+        try:
+            remote_handler.s3_resource.Object(self.s3_bucket, remote_log_name).load()
+            assert False
+        except botocore.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                assert True
+            else:
+                assert False
 
 
 class TestCLPSockHandlerBase(TestCLPHandlerBase):
