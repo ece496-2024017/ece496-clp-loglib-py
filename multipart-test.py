@@ -22,9 +22,8 @@ remote_handler.complete_upload()
 '''
 
 
-
 uploader = CLPRemoteHandler(s3_bucket)
-loglevel_timeout = CLPLogLevelTimeout(lambda: uploader.timeout("example.clp.zst", Path("example.clp.zst")))
+loglevel_timeout = CLPLogLevelTimeout(lambda: uploader.timeout(Path("example.clp.zst")))
 clp_handler = CLPFileHandler(Path("example.clp.zst"), loglevel_timeout=loglevel_timeout)
 logger = logging.getLogger(__name__)
 logger.addHandler(clp_handler)

@@ -108,12 +108,12 @@ class CLPRemoteHandler(CLPFileHandler):
     def set_obj_key(self, obj_key) -> None:
         self.obj_key = obj_key
 
-    def initiate_upload(self, log_name: str, log_path: Path) -> None:
+    def initiate_upload(self, log_path: Path) -> None:
         if self.upload_in_progress:
             raise Exception("An upload is already in progress. Cannot initiate another upload.")
 
-        self.log_name: str = log_name
         self.log_path: Path = log_path
+        self.log_name: str = log_path.name
         self.upload_in_progress = True
         timestamp: datetime.datetime = datetime.datetime.now()
         self.remote_folder_path: str = f"logs/{timestamp.year}/{timestamp.month}/{timestamp.day}"
@@ -205,11 +205,11 @@ class CLPRemoteHandler(CLPFileHandler):
             )
             raise e
 
-    def timeout(self, log_name: str, log_path: Path) -> None:
+    def timeout(self, log_path: Path) -> None:
         print("time out start")
         if not self.upload_id:
             super().__init__(fpath=log_path)
-            self.initiate_upload(log_name, log_path)
+            self.initiate_upload(log_path)
 
         self.multipart_upload()
         print("time out end")
