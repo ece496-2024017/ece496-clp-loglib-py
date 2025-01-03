@@ -9,7 +9,7 @@ import os
 import base64
 
 
-class CLPRemoteHandler():
+class CLPRemoteHandler(CLPFileHandler):
     """
     Handles CLP file upload and comparison to AWS S3 bucket.
     Configuration of AWS access key is required. Run command `aws configure`
@@ -19,7 +19,6 @@ class CLPRemoteHandler():
             self,
             s3_bucket: str,
     ) -> None:
-        # super().__init__()
         self.s3_resource: boto3.resources.factory.s3.ServiceResource = boto3.resource("s3")
         self.s3_client: boto3.client = boto3.client("s3")
 
@@ -31,6 +30,7 @@ class CLPRemoteHandler():
         self.remote_folder_path: Optional[str] = None
         self.obj_key: Optional[str] = None
 
+
         self.multipart_upload_config: Dict[str, int] = {
             "size": 1024 * 1024 * 5,
             "index": 1,
@@ -39,7 +39,7 @@ class CLPRemoteHandler():
         self.uploaded_parts: List[Dict[str, int | str]] = []
         self.upload_id: Optional[int] = None
         self.upload_in_progress: bool = False
-        self.closed: bool = False
+        # self.closed: bool = False
 
     def _remote_log_naming(self, timestamp: datetime.datetime) -> str:
         new_filename: str
@@ -125,7 +125,7 @@ class CLPRemoteHandler():
 
     def complete_upload(self) -> None:
         if not self.upload_id:
-            raise Exception ("No upload process to complete.")
+            raise Exception("No upload process to complete.")
 
         file_size: int = self.log_path.stat().st_size
         try:
@@ -141,6 +141,7 @@ class CLPRemoteHandler():
             )
             raise e
 
+        print(self.obj_key)
         response = self.s3_client.complete_multipart_upload(
             Bucket=self.bucket,
             Key=self.obj_key,
@@ -163,12 +164,15 @@ class CLPRemoteHandler():
         self.upload_id = None
         self.obj_key = None
 
+
+
     def multipart_upload(self) -> None:
         # Upload initiation is required before upload
         if not self.upload_id:
             raise Exception("No upload process.")
 
         file_size: int = self.log_path.stat().st_size
+        print(file_size)
         try:
             while (
                 file_size - self.multipart_upload_config["pos"]
@@ -182,7 +186,7 @@ class CLPRemoteHandler():
 
                 # AWS S3 limits object part count to 10000
                 if self.multipart_upload_config["index"] > 10000:
-                    self.complete_upload(self.upload_id)
+                    self.complete_upload()
 
                     # Initiate multipart upload to a new S3 object
                     self.remote_file_count += 1
@@ -200,3 +204,19 @@ class CLPRemoteHandler():
                 Bucket=self.bucket, Key=self.obj_key, UploadId=self.upload_id
             )
             raise e
+
+    def timeout(self, log_name: str, log_path: Path) -> None:
+        print("time out start")
+        if not self.upload_id:
+            super().__init__(fpath=log_path)
+            self.initiate_upload(log_name, log_path)
+
+        self.multipart_upload()
+        print("time out end")
+
+    def close(self):
+        print("close start")
+        super().close()
+        if self.closed:
+            self.complete_upload()
+        print("close end")
